@@ -76,7 +76,5 @@ licensing question this split exists to avoid.
 
 ©2026 The Simons Foundation, Inc.
 
-Licensed under the [GNU General Public License v3.0 or later](LICENSE), because it
-imports `kimimaro` and `dijkstra3d`, both GPL-3.0-or-later, which makes it a combined
-work (see the Licence note in `neu_skel/neutu_trace.py`). See
+Licensed under the [GNU General Public License v3.0 or later](LICENSE). See
 [CONTRIBUTING.md](CONTRIBUTING.md) for how contributions are licensed.
