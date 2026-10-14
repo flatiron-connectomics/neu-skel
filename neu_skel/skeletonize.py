@@ -9,9 +9,9 @@ huge bbox, and its dense crop array is what OOMs. A block is bounded by
 construction. A body wholly inside one block yields a single fragment, so fusion
 is a no-op for it and only large/spanning bodies see real welding.
 
-The alignment discipline (see coords.py) is the important part: run kimimaro with
-``anisotropy = voxel_size`` so its vertices are physical nm, then shift by the
-block/crop origin so skeletons land in the **same physical-nm world space as the
+The alignment discipline (see ``neu_morpho.coords``) is the important part: run
+kimimaro with ``anisotropy = voxel_size`` so its vertices are physical nm, then shift
+by the block/crop origin so skeletons land in the **same physical-nm world space as the
 meshes** — this is what prevents the mesh<->skeleton offset (mesh-n-bone 231668).
 """
 
@@ -21,8 +21,9 @@ from typing import Sequence
 
 import numpy as np
 
+from neu_morpho.coords import crop_origin_nm, skeleton_to_physical
+
 from .config import SkeletonConfig
-from .coords import crop_origin_nm, skeleton_to_physical
 
 
 def _teasar_params(cfg: SkeletonConfig) -> dict:
@@ -350,27 +351,3 @@ def fusion_stats_summary(per_body: Sequence[dict]) -> dict:
     out["inferred_cable_nm"] = inferred
     out["inferred_cable_fraction"] = (inferred / out["cable_joined_nm"]) if out["cable_joined_nm"] else 0.0
     return out
-
-
-def skeleton_metrics(skeleton) -> dict:
-    """Per-body morphology metrics for the metrics DB (all lengths in nm).
-
-    The same functions ``neu-morpho measure`` applies to a published skeleton, so a run's
-    columns and a measured dataset's mean the same thing.
-    """
-    from neu_lib import Skeleton
-
-    from .measure.metrics import cable_length_nm, max_radius_nm, topology
-
-    radius = getattr(skeleton, "radius", None)
-    skel = Skeleton(vertices_zyx_nm=np.asarray(skeleton.vertices, dtype=float),
-                    edges=np.asarray(skeleton.edges).reshape(-1, 2),
-                    radii_nm=None if radius is None or not len(radius) else radius)
-    top = topology(skel)
-    max_r = max_radius_nm(skel)
-    return {
-        "cable_length_nm": cable_length_nm(skel),
-        "n_branches": top["n_branches"],
-        "n_tips": top["n_tips"],
-        "max_radius_nm": max_r if np.isfinite(max_r) else None,
-    }

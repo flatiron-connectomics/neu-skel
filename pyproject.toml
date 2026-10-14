@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "neu-skel"
+version = "0.1.0"
+description = "TEASAR skeletons from segmentation volumes, as a stage of neu-morpho's pipeline, into neuroglancer-precomputed."
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
+# neu-morpho is pinned to 3.12 by vol2mesh and dvidutils (conda-only, py312 builds).
+requires-python = ">=3.12,<3.13"
+authors = [{ name = "Erik Schomburg", email = "eschomburg@flatironinstitute.org" }]
+# The neu-* packages are in the neu-suite repository and not yet on PyPI; install them
+# from a checkout of it (see the README).
+dependencies = [
+    "numpy>=2",
+    "scipy",
+    "kimimaro",        # TEASAR (GPL-3.0-or-later): the kimimaro tracer, block fusion
+    "dijkstra3d",      # GPL-3.0-or-later: distance and parent fields for neutu_trace
+    "osteoid>=0.7.3",  # Skeleton; below 0.7.3 consolidate promotes edges to int64
+    "neu-lib",
+    "neu-vol",
+    "neu-morpho",      # the pipeline, fragment store, precomputed writer, metrics DB
+    "blockrun",
+]
+
+[project.scripts]
+neu-skel = "neu_skel.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["neu_skel"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

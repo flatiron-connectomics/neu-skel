@@ -8,9 +8,10 @@ import numpy as np
 import pytest
 
 from neu_morpho import fragments as F
-from neu_morpho.config import OutputConfig, SkeletonConfig
-from neu_morpho.ops.skeletonize_segments import skeletonize_segments
-from neu_morpho.skeleton import fuse_body, skeletonize_block
+from neu_morpho.config import OutputConfig
+from neu_skel.config import SkeletonConfig
+from neu_skel.stage import skeletonize_segments
+from neu_skel.skeletonize import fuse_body, skeletonize_block
 
 
 def _write_seg_zarr(path, vol):
@@ -160,7 +161,7 @@ def _split_body():
 def test_default_join_does_not_bridge_a_segmentation_split():
     """The default join radius is seam-scale: distant pieces of a split stay apart and
     present. An unbounded join would invent a straight edge's worth of cable."""
-    from neu_morpho.skeleton import join_radius_nm
+    from neu_skel.skeletonize import join_radius_nm
 
     cfg = _cfg()
     assert join_radius_nm(cfg) == 16.0                  # 2 x 8 nm voxel
@@ -226,7 +227,7 @@ def test_the_fusion_chain_keeps_uint32_edges_and_float32_vertices():
     """Fragments and fused skeletons keep the dtypes the compiled postprocess and the
     precomputed encoder require (needs osteoid >= 0.7.3, which stopped promoting edges
     to int64 in `consolidate`)."""
-    from neu_morpho.skeleton import join_radius_nm, normalize_dtypes
+    from neu_skel.skeletonize import join_radius_nm, normalize_dtypes
     import kimimaro
 
     cfg = replace(_cfg(), postprocess_dust_nm=0.0, postprocess_tick_nm=1000.0)
@@ -248,7 +249,7 @@ def test_fuse_body_matches_kimimaro_postprocess(tick_nm):
     so it must give the same skeleton as stock `kimimaro.postprocess`."""
     import kimimaro
 
-    from neu_morpho.skeleton import join_radius_nm, normalize_dtypes
+    from neu_skel.skeletonize import join_radius_nm, normalize_dtypes
 
     cfg = replace(_cfg(), postprocess_dust_nm=200.0, postprocess_tick_nm=tick_nm)
     frags = _arbor_frags(cfg)
@@ -277,7 +278,7 @@ def test_tick_removal_prunes_twigs():
 
 
 def test_fusion_stats_attribute_what_was_dropped():
-    from neu_morpho.skeleton import fusion_stats_summary
+    from neu_skel.skeletonize import fusion_stats_summary
 
     cfg = replace(_cfg(), postprocess_dust_nm=200.0, postprocess_tick_nm=1000.0)
     frags = _arbor_frags(cfg)

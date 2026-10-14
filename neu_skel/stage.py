@@ -1,9 +1,9 @@
-"""Block-first, two-stage skeletonization orchestrated with blockrun.
+"""The skeleton stage: block-first, two-stage skeletonization orchestrated with blockrun.
 
     stage 1 "skel-chunk" : block_map over non-empty blocks -> per-(body,block) fragments
     stage 2 "skel-fuse"  : block_map over bodies (from fragments) -> precomputed skeletons
 
-Deliberately the same shape as ``ops/meshify``: a manifest with two groups
+Deliberately the same shape as ``neu_morpho.ops.meshify``: a manifest with two groups
 ("skel-chunk" keyed by block index, "skel-fuse" keyed by body id), the same
 occupancy prefilter and fragment-store pattern, resume by skipping done keys, and
 running only stage 2 reuses fragments already on disk. It defaults to its **own**
@@ -14,7 +14,9 @@ away the other pipeline's progress.
 The scale is the caller's choice, expressed as ``SkeletonConfig.anisotropy`` —
 the skeleton scale's voxel size in nm. Vertices are physical nm throughout, so
 they share one model space with the meshes and the ``info`` transform is identity
-(see coords.py).
+(see ``neu_morpho.coords``).
+
+:func:`run_stage` is the ``skel`` stage of a :mod:`neu_morpho.pipeline` run.
 """
 
 from __future__ import annotations
@@ -24,18 +26,20 @@ import json
 import logging
 from typing import Any, Sequence
 
-from blockrun import Manifest, block_map, iter_blocks
+import numpy as np
 
-from ..allowlist import load_allowlist
-from ..config import OutputConfig, SkeletonConfig
-from ..occupancy import occupied_blocks
-from ..precomputed import write_body_skeleton, write_skeleton_info
-from ..skeleton import (fuse_body, fusion_stats_summary, skeleton_metrics,
-                        skeletonize_block)
-from .. import fragments as _frag
-from .. import roi as _roi
-from ._manifest import (FAILED, FailureBreaker, check_manifest_matches_output,
-                        group_counts, guarded, is_complete, write_failures)
+from blockrun import Manifest, block_map, iter_blocks
+from neu_morpho import fragments as _frag
+from neu_morpho import roi as _roi
+from neu_morpho.allowlist import load_allowlist
+from neu_morpho.config import OutputConfig
+from neu_morpho.occupancy import occupied_blocks
+from neu_morpho.ops.manifest import (FAILED, FailureBreaker, check_manifest_matches_output,
+                                     group_counts, guarded, is_complete, write_failures)
+from neu_morpho.precomputed import write_body_skeleton, write_skeleton_info
+
+from .config import SkeletonConfig
+from .skeletonize import fuse_body, fusion_stats_summary, skeletonize_block
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +67,7 @@ def _fuse_one_body(body_id: int, *, chunked_dir: str, out_dir: str,
     it (its whole skeleton was shorter than ``postprocess_dust_nm``). They are
     distinct statuses because the second is a thresholding decision that silently
     deletes small bodies, and you should be able to see how often it fires.
-    Exceptions become ``failed`` via ``_manifest.guarded``.
+    Exceptions become ``failed`` via ``neu_morpho.ops.manifest.guarded``.
     """
     frags = _frag.read_body_skel_fragments(chunked_dir, body_id, cfg.fragment_format)
     if not frags:
@@ -73,7 +77,22 @@ def _fuse_one_body(body_id: int, *, chunked_dir: str, out_dir: str,
     if skel is None:
         return (body_id, "dust", None, stats)
     write_body_skeleton(out_dir, body_id, skel)
-    return (body_id, "written", skeleton_metrics(skel), stats)
+    return (body_id, "written", _db_columns(skel), stats)
+
+
+def _db_columns(skel) -> dict:
+    """The metrics-DB columns for a fused skeleton, by neu-morpho's own definition."""
+    from neu_lib import Skeleton
+    from neu_morpho.measure import skeleton_columns
+
+    radius = getattr(skel, "radius", None)
+    cols = skeleton_columns(Skeleton(
+        vertices_zyx_nm=np.asarray(skel.vertices, dtype=float),
+        edges=np.asarray(skel.edges).reshape(-1, 2),
+        radii_nm=None if radius is None or not len(radius) else radius))
+    if not np.isfinite(cols["max_radius_nm"]):
+        cols["max_radius_nm"] = None
+    return cols
 
 
 # --------------------------------------------------------------------------- #
@@ -116,7 +135,7 @@ def skeletonize_segments(
     ``fusion_stats_path`` to also dump the per-body rows as JSONL.
 
     Stage-2 failures are isolated per body (stage 1 is not — see
-    ``ops/_manifest.py``). ``max_consecutive_failures`` stops the stage when the
+    ``neu_morpho.ops.manifest``). ``max_consecutive_failures`` stops the stage when the
     failures stop looking incidental; 0 disables it. A systemic error
     (``MemoryError``, a full disk, a broken import) aborts immediately regardless.
     """
@@ -163,16 +182,16 @@ def skeletonize_segments(
 
     db = None
     if db_path is not None:
-        from ..metrics_db import MetricsDB
+        from neu_morpho.metrics_db import MetricsDB
         db = MetricsDB(db_path)
     fused = 0
     fusion_stats: list[dict] = []       # per-body accounting of what fusion changed
-    failures: list[dict] = []           # isolated stage-2 failures (see _manifest.py)
+    failures: list[dict] = []           # isolated stage-2 failures
     failures_path = None
     breaker = FailureBreaker(max_consecutive_failures)
     try:
         if "skel-chunk" in stages:
-            # Stage 1 is deliberately NOT fault-isolated: see ops/_manifest.py.
+            # Stage 1 is deliberately NOT fault-isolated: see neu_morpho.ops.manifest.
             todo = [b for b in blocks if not (resume and is_complete(manifest, "skel-chunk", b.index))]
             worker = functools.partial(_chunk_block, seg_spec=seg_spec,
                                        chunked_dir=chunked_dir, cfg=cfg, allow=allow)
@@ -238,3 +257,27 @@ def skeletonize_segments(
             "fusion_stats": fusion_stats_summary(fusion_stats),
             "fusion_stats_path": fusion_stats_path if fusion_stats else None,
             "progress_path": progress}
+
+
+def run_stage(plan, client, allowlist, *, tracer: str | None = None,
+              neutu_cost: str | None = None) -> dict:
+    """The ``skel`` stage of a :mod:`neu_morpho.pipeline` plan; a pipeline stage runner.
+
+    Reads the plan's ``skel`` scale, ROI, block shape, occupancy filter and metrics DB;
+    ``tracer`` / ``neutu_cost`` default to :class:`SkeletonConfig`'s.
+    """
+    from neu_vol import scale_spec
+
+    s = plan.scales["skel"]
+    defaults = SkeletonConfig()
+    cfg = SkeletonConfig(skeleton_scale=s.index, block_shape=plan.block,
+                         anisotropy=s.voxel_size, tracer=tracer or defaults.tracer,
+                         neutu_cost=neutu_cost or defaults.neutu_cost)
+    return skeletonize_segments(
+        scale_spec(plan.src, s.index), OutputConfig(dst=plan.dst, work_dir=plan.work_dir),
+        cfg, allowlist=allowlist, roi=plan.rois["skel"],
+        occupancy_spec=plan.occupancy_spec, occupancy_voxel_size=plan.occupancy_voxel_size,
+        occupancy_dilate=plan.occupancy_dilate, db_path=plan.db_path,
+        fusion_stats_path=f"{plan.work_dir}/fusion_stats.jsonl",
+        max_consecutive_failures=plan.max_consecutive_failures, client=client,
+        resume=plan.resume)

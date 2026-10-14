@@ -1,6 +1,6 @@
 # Skeletonization: the NeuTu-style tracer, and why it is set up this way
 
-`neu_morpho.neutu_trace` is the default tracer. It reproduces NeuTu's skeletons
+`neu_skel.neutu_trace` is the default tracer. It reproduces NeuTu's skeletons
 in Python rather than shelling out to NeuTu, and almost every constant in it was
 chosen against a measurement. This document records those conclusions — it is
 what the code's comments point at when they say "see the skeletonization notes".

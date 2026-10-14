@@ -1,0 +1,53 @@
+name: ci
+
+# neu-skel's tests against neu-suite's main branch, which supplies neu-lib, blockrun,
+# neu-vol and neu-morpho. From PyPI otherwise, so vol2mesh (conda-only) is absent and
+# the two mesh-alignment tests skip. Weekly too, because a change on neu-suite's main
+# can break this repository without any commit here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: neu-skel
+      - uses: actions/checkout@v7
+        with:
+          repository: flatiron-connectomics/neu-suite
+          ref: main
+          path: neu-suite
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install ./neu-suite/neu-lib ./neu-suite/blockrun ./neu-suite/neu-vol \
+                      ./neu-suite/neu-morpho
+          pip install -e "./neu-skel[dev]"
+          echo "neu-suite at $(git -C neu-suite rev-parse --short HEAD)"
+      - name: Test
+        working-directory: neu-skel
+        run: python -m pytest -q
+      - name: The command runs outside a checkout
+        working-directory: ${{ runner.temp }}
+        run: neu-skel run --help > /dev/null
