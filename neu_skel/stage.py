@@ -49,9 +49,13 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------- #
 def _chunk_block(block, *, seg_spec: dict, chunked_dir: str, cfg: SkeletonConfig,
                  allow: set[int] | None) -> tuple:
+    """Trace one block into fragments. The read retries transient store errors; one
+    that persists still fails the stage."""
     from neu_vol.backends.base import open_backend
+    from neu_vol.retry import with_retry
 
-    seg = open_backend(seg_spec).read_region(block.region)   # one block at the skeleton scale
+    seg = with_retry(lambda: open_backend(seg_spec).read_region(block.region),
+                     label=f"skel block {block.index}")       # one block at the skeleton scale
     origin_vox = tuple(s.start for s in block.region)
     skels = skeletonize_block(seg, origin_vox, cfg, allow)
     for body_id, skel in skels.items():
