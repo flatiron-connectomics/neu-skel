@@ -1,9 +1,9 @@
 # neu-skel
 
 TEASAR **skeletons** per segment of a segmentation volume, written as
-neuroglancer-precomputed skeletons. It runs as a stage of
-[neu-morpho](https://github.com/flatiron-connectomics/neu-suite/tree/main/neu-morpho)'s
-pipeline, so skeletons land in the same volume, metrics DB and run summary as the meshes.
+neuroglancer-precomputed skeletons. It adds a `skel` stage to a
+[neu-morpho](https://github.com/flatiron-connectomics/neu-suite/tree/main/neu-morpho) run,
+so skeletons land in the same volume, metrics DB and run summary as the meshes.
 
 - **Tracers**: `neu_skel.neutu_trace` by default, a reimplementation of NeuTu's TEASAR
   that matches it to sub-voxel centreline agreement with ~2.6× fewer nodes than
@@ -19,7 +19,7 @@ GPL-3.0-or-later, so this package is too. neu-morpho and the rest of
 [neu-suite](https://github.com/flatiron-connectomics/neu-suite) are Apache-2.0. The
 dependency runs one way: neu-skel imports neu-morpho, and nothing in neu-suite imports
 neu-skel. Reading, viewing and measuring skeletons needs only neu-suite:
-`neu_morpho.readback`, `neu-morpho measure skeletons`, neu-draw and neu-glance all work
+`neu_vol.readback`, `neu-morpho measure skeletons`, neu-draw and neu-glance all work
 on skeletons however they were made.
 
 ## Install
@@ -39,29 +39,37 @@ python -m pytest -q neu-skel
 
 ## Running it
 
-`neu-skel run` is `neu-morpho run` with a `skel` stage added after `mesh`: it takes every
-`neu-morpho run` argument (`neu-morpho help run`), plus `--skel-scale`, `--tracer` and
-`--neutu-cost`. Its default stages are `index,mesh,skel`.
+`neu-skel run` runs only the `skel` stage. Index and mesh are `neu-morpho run`'s, and
+both commands take the same `--src`, `--dst` and `--work-dir`:
 
 ```bash
-# one small cube, in-process
+neu-morpho run --src /path/to/seg \
+    --dst /path/to/morpho/segmentation --work-dir /path/to/morpho \
+    --serial --roi 0,0,0,512,2048,2048 --roi-scale 2 --stages index,mesh --min-voxels 1000
 neu-skel run --src /path/to/seg \
     --dst /path/to/morpho/segmentation --work-dir /path/to/morpho \
-    --serial --roi 0,0,0,512,2048,2048 --roi-scale 2 --stages index,mesh,skel
-
-# skeletons only, onto a volume whose index stage has already run
-neu-skel run --src /path/to/seg --dst ... --work-dir ... --stages skel
+    --serial --roi 0,0,0,512,2048,2048 --roi-scale 2
 ```
 
+It takes `neu-morpho run`'s options except the other stages' (`--stages`, `--seg-*`,
+`--index-scale`, `--mesh-scale`), plus `--skel-scale`, `--tracer` and `--neutu-cost`.
+Bodies are chosen as in neu-morpho:
+
+- `--min-voxels` / `--limit-bodies` select from the index's voxel counts, so the work
+  dir must hold an index. The allowlist they write there is reused by a later run that
+  passes no selection, so the example's `neu-skel run` skeletonizes the meshed bodies.
+- `--allowlist FILE` needs no index, and is not copied into the work dir: pass it to
+  both commands.
+- With none of these and no allowlist in the work dir, every body is skeletonized.
+
 `neu-morpho progress <work-dir>` and `neu-morpho run-report <work-dir>` report the skel
-stage like the others. From Python, the stage is a runner for `neu_morpho.pipeline`:
+stage beside the others. From Python, the stage is a runner for `neu_morpho.pipeline`:
 
 ```python
 from neu_morpho import pipeline
 from neu_skel import run_stage
 
-p = pipeline.plan(src, dst, work_dir=work, stages=("index", "skel"),
-                  extra_stages={"skel": 2})
+p = pipeline.plan(src, dst, work_dir=work, stages=("skel",), extra_stages={"skel": 2})
 summary = pipeline.run(p, runners={"skel": run_stage})
 ```
 

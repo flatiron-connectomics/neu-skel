@@ -1,15 +1,21 @@
-"""neu-skel: neu-morpho's pipeline with a skeleton stage, locally or on SLURM.
+"""neu-skel: skeletons per body, added to a neu-morpho run, locally or on SLURM.
 
-    neu-skel run ...      # neu-morpho run, plus the skel stage
+    neu-skel run ...      # the skel stage, in a neu-morpho work dir
 
-``run`` takes every argument of ``neu-morpho run`` (see ``neu-morpho help run``) and adds
-``skel``: TEASAR skeletons per body, written into the same volume, metrics DB and run
-summary as the meshes. Progress and reports come from neu-morpho:
-``neu-morpho progress <work-dir>`` and ``neu-morpho run-report <work-dir>`` cover the
-skel stage too.
+``run`` traces skeletons per body and writes them into the volume at --dst, beside the
+meshes, with their cable metrics in the work dir's metrics DB. Index and mesh are
+``neu-morpho run``'s; point both commands at the same --src, --dst and --work-dir:
 
-    neu-skel run --src ... --dst /path/to/morpho/segmentation --work-dir /path/to/morpho \\
-        --serial --roi 0,0,0,512,2048,2048 --roi-scale 2 --stages index,mesh,skel
+    neu-morpho run --src S --dst D --work-dir W --stages index,mesh --min-voxels 1000
+    neu-skel run   --src S --dst D --work-dir W
+
+--min-voxels and --limit-bodies select bodies from the index's voxel counts, so they need
+the index run, and the allowlist they write in W is reused by any later run passing none
+of the three. An explicit --allowlist is not copied into W: pass it to both commands.
+``neu-morpho progress W`` and ``neu-morpho run-report W`` cover the skel stage too.
+
+The skel stage has two phases, fragments per (body, block) and then one skeleton fused
+per body, with its own manifest; a re-run reuses the fragments already on disk.
 """
 
 from __future__ import annotations
@@ -17,25 +23,17 @@ from __future__ import annotations
 import argparse
 import logging
 
-from neu_morpho.cli import add_run_args, check_run_args, run_main, stages_help
-from neu_morpho.pipeline import STAGE_DOC as MORPHO_STAGE_DOC
-
-STAGE_DOC = {
-    **MORPHO_STAGE_DOC,
-    "skel": "skeletons, per body (the neutu tracer by default). Two phases — fragments "
-            "per (body, block), then one skeleton fused per body — with its own manifest; "
-            "a re-run with only this stage reuses the fragments.",
-}
+from neu_morpho.cli import add_run_args, check_run_args, run_main
 
 
 def build_parser() -> argparse.ArgumentParser:
     top = argparse.ArgumentParser(prog="neu-skel", description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = top.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("run", help="neu-morpho's pipeline, plus the skel stage",
-                       description=f"{__doc__}\n{stages_help(stage_doc=STAGE_DOC)}",
+    p = sub.add_parser("run", help="skeletons per body, in a neu-morpho work dir",
+                       description=__doc__,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_run_args(p, stages=tuple(STAGE_DOC), default_stages="index,mesh,skel")
+    add_run_args(p, stages=("skel",))
     p.add_argument("--skel-scale", type=int, default=2,
                    help="scale to skeletonize at (default: 2)")
     p.add_argument("--tracer", default="neutu", choices=("kimimaro", "neutu"),

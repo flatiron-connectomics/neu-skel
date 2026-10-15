@@ -1,4 +1,4 @@
-"""neu-skel: TEASAR skeletons per segment, as a stage of neu-morpho's pipeline.
+"""neu-skel: TEASAR skeletons per segment, a stage added to a neu-morpho run.
 
 Two tracers: ``neutu_trace`` (default), a reimplementation of NeuTu's TEASAR, and
 ``kimimaro``, required for anisotropic voxels. Skeletons are traced per block and fused
@@ -11,8 +11,7 @@ From Python::
     from neu_morpho import pipeline
     from neu_skel import run_stage
 
-    p = pipeline.plan(src, dst, work_dir=work, stages=("index", "skel"),
-                      extra_stages={"skel": 2})
+    p = pipeline.plan(src, dst, work_dir=work, stages=("skel",), extra_stages={"skel": 2})
     pipeline.run(p, runners={"skel": run_stage})
 """
 

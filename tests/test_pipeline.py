@@ -1,4 +1,4 @@
-"""`neu-skel run`: neu-morpho's pipeline with the skel stage, end to end."""
+"""`neu-skel run`: the skel stage on neu-morpho's pipeline, end to end."""
 
 import json
 
@@ -81,6 +81,49 @@ def test_the_cli_plans_the_skel_stage(tmp_path, capsys):
 
     src = _source(tmp_path)
     assert cli.main(["run", "--src", src, "--dst", str(tmp_path / "out" / "seg"),
-                     "--serial", "--dry-run", "--index-scale", "0", "--mesh-scale", "0",
-                     "--skel-scale", "1", "--block", "32,32,32",
+                     "--serial", "--dry-run", "--skel-scale", "1", "--block", "32,32,32",
                      "--occupancy-scale", "-1"]) == 0
+
+
+@pytest.mark.parametrize("flag", ["--stages", "--mesh-scale", "--index-scale"])
+def test_the_cli_runs_only_the_skel_stage(flag):
+    from neu_skel import cli
+
+    with pytest.raises(SystemExit):
+        cli._parse_args(["run", "--src", "x", "--dst", "y", flag, "0"])
+
+
+def test_skeletons_follow_a_neu_morpho_index_in_the_same_work_dir(tmp_path):
+    """The two-command workflow: the skel run reuses the index run's size filter."""
+    from neu_morpho import cli as morpho_cli
+
+    from neu_skel import cli
+
+    src = _source(tmp_path)
+    work = tmp_path / "out"
+    common = ["--src", src, "--dst", str(work / "seg"), "--serial", "--block", "32,32,32",
+              "--occupancy-scale", "-1"]
+    assert morpho_cli.main(["run", *common, "--stages", "seg,index",
+                            "--index-scale", "0", "--mesh-scale", "0",
+                            "--min-voxels", "2000"]) == 0
+    assert cli.main(["run", *common, "--skel-scale", "0"]) == 0
+
+    summary = json.loads((work / "run_summary.json").read_text())
+    assert list(summary["stages"]) == ["seg", "index", "skel"]
+    assert summary["linked_subresources"] == {"skeletons": "skeleton"}
+
+    from neu_morpho.metrics_db import MetricsDB
+
+    db = MetricsDB(str(work / "metrics.db"), read_only=True)
+    cable = dict(db.con.execute("SELECT body_id, cable_length_nm FROM bodies"))
+    db.close()
+    assert cable[7] > 300 and cable[9] is None          # 9 (1728 voxels) is filtered out
+
+
+def test_a_size_filter_without_an_index_is_refused(tmp_path):
+    from neu_skel import cli
+
+    src = _source(tmp_path)
+    with pytest.raises(SystemExit, match="metrics.db does not exist"):
+        cli.main(["run", "--src", src, "--dst", str(tmp_path / "out" / "seg"),
+                  "--serial", "--min-voxels", "10", "--occupancy-scale", "-1"])
