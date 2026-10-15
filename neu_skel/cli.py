@@ -88,6 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--serial", action="store_true",
                    help="no dask at all — run in this process")
     p.add_argument("--no-resume", action="store_true", help="start over, ignoring manifests")
+    p.add_argument("--allow-body-failures", action="store_true",
+                   help="exit 0 when the only failures are individual bodies (still "
+                        "logged, listed in failures.skel.jsonl and retried next run); an "
+                        "aborted stage or a store error still exits non-zero")
     p.add_argument("--max-consecutive-failures", type=int, default=10,
                    help="stop after this many per-body failures in a row (0 disables)")
     p.add_argument("--dry-run", action="store_true",
@@ -162,7 +166,12 @@ def _run(args) -> int:
         with start_dask(args.workers, _configs(args), label="neu-skel",
                         effective_config_path=plan.work_dir) as client:
             summary = pipeline.run(plan, client=client, runners=runners)
-    # Per-body failures do not stop the run; exit non-zero so a script notices them.
+    # Per-body failures do not stop the run; exit non-zero so a script notices them,
+    # unless told to.
+    if summary["n_failed_bodies"] and args.allow_body_failures:
+        log.warning("%d bodies failed; exiting 0 (--allow-body-failures)",
+                    summary["n_failed_bodies"])
+        return 0
     return 1 if summary["n_failed_bodies"] else 0
 
 

@@ -65,6 +65,10 @@ are chosen as in neu-morpho:
   meshes only; for a sharded source, pass `--allowlist`.
 - With none of these and no allowlist in the work dir, every body is skeletonized.
 
+A body that fails is logged, listed in `<work-dir>/failures.skel.jsonl` and retried by
+the next run; the run then exits 1, or 0 with `--allow-body-failures`, for a pipeline that
+should carry on. An aborted stage always exits non-zero.
+
 `neu-morpho progress <work-dir>` and `neu-morpho run-report <work-dir>` report the skel
 stage beside the others. From Python, the stage is a runner for `neu_morpho.pipeline`:
 

@@ -188,3 +188,14 @@ def test_meshed_bodies_without_meshes_is_refused(tmp_path):
     with pytest.raises(SystemExit, match="no meshes under"):
         cli.main(["run", "--src", src, "--dst", str(tmp_path / "out" / "seg"), "--serial",
                   "--meshed-bodies", "--skel-scale", "0", "--occupancy-scale", "-1"])
+
+
+@pytest.mark.parametrize("failed, flag, code", [
+    (0, [], 0), (2, [], 1), (2, ["--allow-body-failures"], 0),
+])
+def test_failed_bodies_exit_1_unless_allowed(monkeypatch, failed, flag, code):
+    from neu_skel import cli
+
+    monkeypatch.setattr(pipeline, "plan", lambda *a, **k: object())
+    monkeypatch.setattr(pipeline, "run", lambda p, **k: {"n_failed_bodies": failed})
+    assert cli.main(["run", "--src", "x", "--dst", "y", "--serial", *flag]) == code
