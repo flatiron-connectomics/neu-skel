@@ -64,6 +64,9 @@ are chosen as in neu-morpho:
   directory, so skeletons cover what was meshed however it was selected. Unsharded
   meshes only; for a sharded source, pass `--allowlist`.
 - With none of these and no allowlist in the work dir, every body is skeletonized.
+- A later run in the same work dir may ask for the bodies stage 1 traced, or fewer.
+  It refuses new ones, which its finished blocks would never trace: skeletonize those
+  with a new `--work-dir`.
 
 A body that fails is logged, listed in `<work-dir>/failures.skel.jsonl` and retried by
 the next run; the run then exits 1, or 0 with `--allow-body-failures`, for a pipeline that

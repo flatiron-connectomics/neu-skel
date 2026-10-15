@@ -169,6 +169,29 @@ def test_meshed_bodies_skeletonizes_what_neu_morpho_meshed(tmp_path):
     assert skel["num_bodies_fused"] == 1                 # unselected, 9 is fused too
 
 
+def test_skeletons_for_new_bodies_in_a_finished_work_dir_are_refused(tmp_path):
+    """Stage 1 traced only the listed bodies, so a resume cannot add one."""
+    from neu_morpho.ops.manifest import SelectionChanged
+
+    from neu_skel import cli
+
+    src = _source(tmp_path)
+    work = tmp_path / "out"
+    common = ["--src", src, "--dst", str(work / "seg"), "--serial", "--block", "32,32,32",
+              "--occupancy-scale", "-1", "--skel-scale", "0", "--no-metrics-db"]
+    only = tmp_path / "only.csv"
+    only.write_text("7\n")
+    assert cli.main(["run", *common, "--allowlist", str(only)]) == 0
+    only.write_text("9\n")
+    with pytest.raises(SelectionChanged, match="e.g. 9"):
+        cli.main(["run", *common, "--allowlist", str(only)])
+    # what the message says to do instead
+    assert cli.main(["run", *common, "--allowlist", str(only),
+                     "--work-dir", str(tmp_path / "other")]) == 0
+    other = json.loads((tmp_path / "other" / "run_summary.json").read_text())
+    assert other["stages"]["skel"]["num_bodies_fused"] == 1
+
+
 @pytest.mark.parametrize("extra, match", [
     (["--allowlist", "a.csv"], None),
     (["--min-voxels", "5"], "drop --min-voxels"),

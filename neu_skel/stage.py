@@ -35,7 +35,8 @@ from neu_morpho.allowlist import load_allowlist
 from neu_morpho.config import OutputConfig
 from neu_morpho.occupancy import occupied_blocks
 from neu_morpho.ops.manifest import (FAILED, FailureBreaker, check_manifest_matches_output,
-                                     group_counts, guarded, is_complete, write_failures)
+                                     check_selection, group_counts, guarded, is_complete,
+                                     write_failures)
 from neu_morpho.precomputed import write_body_skeleton, write_skeleton_info
 
 from .config import SkeletonConfig
@@ -181,6 +182,11 @@ def skeletonize_segments(
     # check probes for and so mask a destination that was cleared.
     check_manifest_matches_output(manifest, out_dir, stage="skel",
                                   progress_path=progress, resume=resume)
+    chunk_todo = ([b for b in blocks
+                   if not (resume and is_complete(manifest, "skel-chunk", b.index))]
+                  if "skel-chunk" in stages else [])
+    check_selection(manifest, "skel-chunk", allow, stage="skel", progress_path=progress,
+                    record=bool(chunk_todo))
 
     write_skeleton_info(out_dir)             # identity transform (vertices are nm)
 
@@ -196,7 +202,7 @@ def skeletonize_segments(
     try:
         if "skel-chunk" in stages:
             # Stage 1 is deliberately NOT fault-isolated: see neu_morpho.ops.manifest.
-            todo = [b for b in blocks if not (resume and is_complete(manifest, "skel-chunk", b.index))]
+            todo = chunk_todo
             worker = functools.partial(_chunk_block, seg_spec=seg_spec,
                                        chunked_dir=chunked_dir, cfg=cfg, allow=allow)
             block_map(todo, worker, client=client, npartitions=npartitions,
