@@ -51,9 +51,9 @@ neu-skel run --src /path/to/seg \
     --serial --roi 0,0,0,512,2048,2048 --roi-scale 2
 ```
 
-It takes `neu-morpho run`'s options except the other stages' (`--stages`, `--seg-*`,
-`--index-scale`, `--mesh-scale`), plus `--skel-scale`, `--tracer` and `--neutu-cost`.
-Bodies are chosen as in neu-morpho:
+Its options are those of `neu-morpho run` that apply to skeletons (ROI, block, body
+selection, occupancy, dask), plus `--skel-scale`, `--tracer` and `--neutu-cost`. Bodies
+are chosen as in neu-morpho:
 
 - `--min-voxels` / `--limit-bodies` select from the index's voxel counts, so the work
   dir must hold an index. The allowlist they write there is reused by a later run that

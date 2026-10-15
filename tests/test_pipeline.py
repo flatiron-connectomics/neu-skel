@@ -127,3 +127,19 @@ def test_a_size_filter_without_an_index_is_refused(tmp_path):
     with pytest.raises(SystemExit, match="metrics.db does not exist"):
         cli.main(["run", "--src", src, "--dst", str(tmp_path / "out" / "seg"),
                   "--serial", "--min-voxels", "10", "--occupancy-scale", "-1"])
+
+
+def test_the_cli_defaults_are_neu_morphos():
+    """The shared options are declared here too; their defaults must not drift apart."""
+    import inspect
+
+    from neu_skel import cli
+
+    plan = {k: v.default for k, v in inspect.signature(pipeline.plan).parameters.items()}
+    args = cli._parse_args(["run", "--src", "x", "--serial"])
+    ours = {k: getattr(args, k) for k in ("occupancy_scale", "occupancy_dilate", "min_voxels",
+                                          "limit_bodies", "max_consecutive_failures",
+                                          "allowlist", "roi_scale")}
+    ours.update(block=tuple(int(v) for v in args.block.split(",")),
+                metrics_db=not args.no_metrics_db, resume=not args.no_resume)
+    assert ours == {k: plan[k] for k in ours}

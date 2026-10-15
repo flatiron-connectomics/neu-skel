@@ -4,7 +4,8 @@
 
 ``run`` traces skeletons per body and writes them into the volume at --dst, beside the
 meshes, with their cable metrics in the work dir's metrics DB. Index and mesh are
-``neu-morpho run``'s; point both commands at the same --src, --dst and --work-dir:
+``neu-morpho run``'s; give both commands the same --src, --dst and --work-dir, and the
+same --roi if there is one:
 
     neu-morpho run --src S --dst D --work-dir W --stages index,mesh --min-voxels 1000
     neu-skel run   --src S --dst D --work-dir W
@@ -23,7 +24,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from neu_morpho.cli import add_run_args, check_run_args, run_main
+log = logging.getLogger("neu-skel")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,7 +34,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("run", help="skeletons per body, in a neu-morpho work dir",
                        description=__doc__,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
-    add_run_args(p, stages=("skel",))
+    p.add_argument("--src", required=True, help="segmentation volume (path or s3://...)")
+    p.add_argument("--dst", help="the published precomputed volume the skeletons go "
+                                 "into, as given to neu-morpho run")
+    p.add_argument("--work-dir", help="the neu-morpho run directory. Defaults to the "
+                                      "PARENT of a local --dst; required when --dst is "
+                                      "remote")
+    p.add_argument("--describe", action="store_true",
+                   help="print the source pyramid and exit (no cluster, no writes)")
+
     p.add_argument("--skel-scale", type=int, default=2,
                    help="scale to skeletonize at (default: 2)")
     p.add_argument("--tracer", default="neutu", choices=("kimimaro", "neutu"),
@@ -47,27 +56,101 @@ def build_parser() -> argparse.ArgumentParser:
                         "symmetric cost and matches it more closely. 'voxel' is "
                         "cheaper in memory, which matters only if a component exceeds "
                         "SkeletonConfig.neutu_edge_max_gb (see docs/skeletonization.md)")
+
+    p.add_argument("--roi", help="z0,y0,x0,z1,y1,x1 voxels, at --roi-scale")
+    p.add_argument("--roi-scale", type=int, default=None,
+                   help="scale the --roi values are given in; required with --roi")
+    p.add_argument("--block", default="256,256,256", help="block shape (z,y,x) voxels")
+    p.add_argument("--min-voxels", type=int, default=0,
+                   help="only bodies with at least this many voxels, from the work "
+                        "dir's index")
+    p.add_argument("--limit-bodies", type=int, default=None,
+                   help="only the N largest bodies, from the work dir's index")
+    p.add_argument("--allowlist", help="explicit body-id file (overrides --min-voxels)")
+    p.add_argument("--no-metrics-db", action="store_true",
+                   help="do not write cable metrics to the work dir's metrics DB")
+    p.add_argument("--occupancy-scale", type=int, default=5,
+                   help="coarse scale used to skip empty blocks; -1 disables")
+    p.add_argument("--occupancy-dilate", type=int, default=1,
+                   help="grow the occupied set by N blocks; keep >=1, since a coarse "
+                        "scale misses sparse blocks")
+
+    p.add_argument("--config", action="append", default=None, metavar="NAME_OR_PATH",
+                   help="dask config: a blockrun template (dask-local, "
+                        "dask-slurm-example) or a YAML path. Repeatable, deep-merged "
+                        "left to right. Default: dask-local")
+    p.add_argument("--workers", type=int, default=4)
+    p.add_argument("--serial", action="store_true",
+                   help="no dask at all — run in this process")
+    p.add_argument("--no-resume", action="store_true", help="start over, ignoring manifests")
+    p.add_argument("--max-consecutive-failures", type=int, default=10,
+                   help="stop after this many per-body failures in a row (0 disables)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="report the plan (scale, ROI, block count) and exit")
+    p.add_argument("--store-logs", action="store_true",
+                   help="keep TensorStore's benign S3 credential-chain logging")
     p.set_defaults(func=_run)
-    top._run_parser = p
     return top
 
 
+def _configs(args) -> list[str]:
+    return args.config or ["dask-local"]
+
+
 def _parse_args(argv=None):
-    top = build_parser()
-    args = top.parse_args(argv)
-    check_run_args(top._run_parser, args)
+    args = build_parser().parse_args(argv)
+    if not args.serial:                       # a mistyped --config fails before any read
+        from blockrun import load_config
+
+        load_config(_configs(args))
     return args
 
 
 def _run(args) -> int:
     import functools
 
+    from neu_morpho import pipeline
+    from neu_morpho.roi import parse_roi
+
     from .stage import run_stage
 
-    runner = functools.partial(run_stage, tracer=args.tracer, neutu_cost=args.neutu_cost)
-    return run_main(args, extra_stages={"skel": args.skel_scale}, runners={"skel": runner},
-                    extra={"tracer": args.tracer, "neutu_cost": args.neutu_cost},
-                    label="neu-skel")
+    if args.describe:
+        from neu_vol import describe_scales
+
+        print(describe_scales(args.src))
+        return 0
+    if not args.dst:
+        raise SystemExit("--dst is required unless --describe")
+    try:
+        plan = pipeline.plan(
+            args.src, args.dst, work_dir=args.work_dir, stages=("skel",),
+            extra_stages={"skel": args.skel_scale},
+            block=tuple(int(v) for v in args.block.split(",")),
+            roi=parse_roi(args.roi), roi_scale=args.roi_scale,
+            occupancy_scale=args.occupancy_scale, occupancy_dilate=args.occupancy_dilate,
+            allowlist=args.allowlist, min_voxels=args.min_voxels,
+            limit_bodies=args.limit_bodies, metrics_db=not args.no_metrics_db,
+            max_consecutive_failures=args.max_consecutive_failures,
+            resume=not args.no_resume,
+            extra={"tracer": args.tracer, "neutu_cost": args.neutu_cost})
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    if args.dry_run:
+        log.info("--dry-run: nothing executed")
+        return 0
+
+    runners = {"skel": functools.partial(run_stage, tracer=args.tracer,
+                                         neutu_cost=args.neutu_cost)}
+    if args.serial:
+        summary = pipeline.run(plan, runners=runners)
+    else:
+        from blockrun import start_dask
+
+        with start_dask(args.workers, _configs(args), label="neu-skel",
+                        effective_config_path=plan.work_dir) as client:
+            summary = pipeline.run(plan, client=client, runners=runners)
+    # Per-body failures do not stop the run; exit non-zero so a script notices them.
+    return 1 if summary["n_failed_bodies"] else 0
 
 
 def main(argv=None) -> int:
