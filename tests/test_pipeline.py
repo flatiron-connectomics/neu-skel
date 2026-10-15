@@ -44,7 +44,7 @@ def test_run_adds_skeletons_to_the_volume_and_the_db(tmp_path):
     assert set(summary["linked_subresources"]) == {"skeletons"}
     assert "skeletons" in json.loads((work / "seg" / "info").read_text())
     plan = json.loads((work / "run_plan.json").read_text())
-    assert plan["tracer"] == "neutu" and plan["scales"]["skel"] == 0
+    assert plan["stages"]["skel"]["tracer"] == "neutu" and plan["stages"]["skel"]["scale"] == 0
 
     from neu_morpho.metrics_db import MetricsDB
 
