@@ -60,6 +60,9 @@ are chosen as in neu-morpho:
   passes no selection, so the example's `neu-skel run` skeletonizes the meshed bodies.
 - `--allowlist FILE` needs no index, and is not copied into the work dir: pass it to
   both commands.
+- `--meshed-bodies` takes the bodies that have a mesh at `--dst`, by listing the mesh
+  directory, so skeletons cover what was meshed however it was selected. Unsharded
+  meshes only; for a sharded source, pass `--allowlist`.
 - With none of these and no allowlist in the work dir, every body is skeletonized.
 
 `neu-morpho progress <work-dir>` and `neu-morpho run-report <work-dir>` report the skel

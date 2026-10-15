@@ -12,7 +12,8 @@ same --roi if there is one:
 
 --min-voxels and --limit-bodies select bodies from the index's voxel counts, so they need
 the index run, and the allowlist they write in W is reused by any later run passing none
-of the three. An explicit --allowlist is not copied into W: pass it to both commands.
+of the three. An explicit --allowlist is not copied into W: pass it to both commands, or use
+--meshed-bodies, which takes the bodies that have a mesh at --dst.
 ``neu-morpho progress W`` and ``neu-morpho run-report W`` cover the skel stage too.
 
 The skel stage has two phases, fragments per (body, block) and then one skeleton fused
@@ -66,7 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "dir's index")
     p.add_argument("--limit-bodies", type=int, default=None,
                    help="only the N largest bodies, from the work dir's index")
-    p.add_argument("--allowlist", help="explicit body-id file (overrides --min-voxels)")
+    choose = p.add_mutually_exclusive_group()
+    choose.add_argument("--allowlist", help="explicit body-id file (overrides --min-voxels)")
+    choose.add_argument("--meshed-bodies", action="store_true",
+                        help="the bodies with a mesh in --dst, listed into "
+                             "<work-dir>/allowlist.meshed.csv. Unsharded meshes only")
     p.add_argument("--no-metrics-db", action="store_true",
                    help="do not write cable metrics to the work dir's metrics DB")
     p.add_argument("--occupancy-scale", type=int, default=5,
@@ -99,6 +104,9 @@ def _configs(args) -> list[str]:
 
 def _parse_args(argv=None):
     args = build_parser().parse_args(argv)
+    if args.meshed_bodies and (args.min_voxels or args.limit_bodies):
+        raise SystemExit("--meshed-bodies chooses the bodies itself; drop --min-voxels "
+                         "and --limit-bodies")
     if not args.serial:                       # a mistyped --config fails before any read
         from blockrun import load_config
 
@@ -135,6 +143,11 @@ def _run(args) -> int:
             extra={"tracer": args.tracer, "neutu_cost": args.neutu_cost})
     except ValueError as e:
         raise SystemExit(str(e)) from None
+    if args.meshed_bodies:
+        import dataclasses
+
+        meshed = _meshed_allowlist(plan, write=not args.dry_run)
+        plan = dataclasses.replace(plan, allowlist=meshed)
     if args.dry_run:
         log.info("--dry-run: nothing executed")
         return 0
@@ -151,6 +164,30 @@ def _run(args) -> int:
             summary = pipeline.run(plan, client=client, runners=runners)
     # Per-body failures do not stop the run; exit non-zero so a script notices them.
     return 1 if summary["n_failed_bodies"] else 0
+
+
+def _meshed_allowlist(plan, *, write: bool) -> str:
+    """List the bodies meshed at ``plan.dst`` into the work dir; returns the file's path."""
+    import os
+
+    from neu_vol import read_json
+    from neu_vol.readback import UnsupportedSubresource, mesh_body_ids
+
+    mesh_dir = (read_json(plan.dst, "info") or {}).get("mesh", "mesh")
+    try:
+        ids = mesh_body_ids(plan.dst, mesh_dir)
+    except UnsupportedSubresource as e:
+        raise SystemExit(f"--meshed-bodies: {e} Use --allowlist.") from None
+    if not ids:
+        raise SystemExit(f"--meshed-bodies: no meshes under {plan.dst}/{mesh_dir}")
+    path = f"{plan.work_dir}/allowlist.meshed.csv"
+    log.info("--meshed-bodies: %d bodies with a mesh -> %s", len(ids), path)
+    if write:
+        os.makedirs(plan.work_dir, exist_ok=True)
+        with open(path, "w") as f:
+            f.write("body_id\n")
+            f.writelines(f"{i}\n" for i in ids)
+    return path
 
 
 def main(argv=None) -> int:

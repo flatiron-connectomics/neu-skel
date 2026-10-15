@@ -111,13 +111,15 @@ def test_skeletons_follow_a_neu_morpho_index_in_the_same_work_dir(tmp_path):
     summary = json.loads((work / "run_summary.json").read_text())
     assert list(summary["stages"]) == ["seg", "index", "skel"]
     assert summary["linked_subresources"] == {"skeletons": "skeleton"}
+    # 9 (1728 voxels) is filtered out; unfiltered, both bodies are fused
+    assert summary["stages"]["skel"]["num_bodies_fused"] == 1
 
     from neu_morpho.metrics_db import MetricsDB
 
     db = MetricsDB(str(work / "metrics.db"), read_only=True)
     cable = dict(db.con.execute("SELECT body_id, cable_length_nm FROM bodies"))
     db.close()
-    assert cable[7] > 300 and cable[9] is None          # 9 (1728 voxels) is filtered out
+    assert cable[7] > 300
 
 
 def test_a_size_filter_without_an_index_is_refused(tmp_path):
@@ -143,3 +145,46 @@ def test_the_cli_defaults_are_neu_morphos():
     ours.update(block=tuple(int(v) for v in args.block.split(",")),
                 metrics_db=not args.no_metrics_db, resume=not args.no_resume)
     assert ours == {k: plan[k] for k in ours}
+
+
+def test_meshed_bodies_skeletonizes_what_neu_morpho_meshed(tmp_path):
+    """A mesh run with an explicit allowlist, then --meshed-bodies: the same bodies."""
+    pytest.importorskip("vol2mesh")
+    from neu_morpho import cli as morpho_cli
+
+    from neu_skel import cli
+
+    src = _source(tmp_path)
+    work = tmp_path / "out"
+    common = ["--src", src, "--dst", str(work / "seg"), "--serial", "--block", "32,32,32",
+              "--occupancy-scale", "-1"]
+    only = tmp_path / "only.csv"
+    only.write_text("body_id\n7\n")
+    assert morpho_cli.main(["run", *common, "--stages", "seg,mesh", "--mesh-scale", "0",
+                            "--allowlist", str(only)]) == 0
+    assert cli.main(["run", *common, "--skel-scale", "0", "--meshed-bodies"]) == 0
+
+    assert (work / "allowlist.meshed.csv").read_text() == "body_id\n7\n"
+    skel = json.loads((work / "run_summary.json").read_text())["stages"]["skel"]
+    assert skel["num_bodies_fused"] == 1                 # unselected, 9 is fused too
+
+
+@pytest.mark.parametrize("extra, match", [
+    (["--allowlist", "a.csv"], None),
+    (["--min-voxels", "5"], "drop --min-voxels"),
+])
+def test_meshed_bodies_excludes_other_selections(extra, match):
+    from neu_skel import cli
+
+    with pytest.raises(SystemExit, match=match):
+        cli._parse_args(["run", "--src", "x", "--dst", "y", "--serial", "--meshed-bodies",
+                         *extra])
+
+
+def test_meshed_bodies_without_meshes_is_refused(tmp_path):
+    from neu_skel import cli
+
+    src = _source(tmp_path)
+    with pytest.raises(SystemExit, match="no meshes under"):
+        cli.main(["run", "--src", src, "--dst", str(tmp_path / "out" / "seg"), "--serial",
+                  "--meshed-bodies", "--skel-scale", "0", "--occupancy-scale", "-1"])
