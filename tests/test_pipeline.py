@@ -250,3 +250,18 @@ def test_skeletons_land_on_their_voxels_whatever_the_volumes_origin(tmp_path, or
     # tolerance is two voxels, against offsets of 800 nm and more
     np.testing.assert_allclose(np.median(verts[:, :2], axis=0), [ox + 264, oy + 264], atol=16)
     assert oz + 4 * 8 - 8 <= verts[:, 2].min() and verts[:, 2].max() <= oz + 60 * 8 + 8
+
+
+def test_skeletonizing_resumed_on_another_block_shape_is_refused(tmp_path):
+    """Blocks are recorded by index, so another grid's block (0,0,0) is another region."""
+    from neu_morpho.ops.manifest import GridChanged
+
+    from neu_skel import cli
+
+    src = _source(tmp_path)
+    common = ["--src", src, "--dst", str(tmp_path / "out" / "seg"), "--serial",
+              "--occupancy-scale", "-1", "--skel-scale", "0", "--no-metrics-db"]
+    assert cli.main(["run", *common, "--block", "32,32,32"]) == 0
+    with pytest.raises(GridChanged, match="Use a new --work-dir"):
+        cli.main(["run", *common, "--block", "64,64,64"])
+    assert cli.main(["run", *common, "--block", "64,64,64", "--no-resume"]) == 0

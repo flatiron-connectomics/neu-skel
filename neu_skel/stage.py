@@ -34,8 +34,9 @@ from neu_morpho import roi as _roi
 from neu_morpho.allowlist import load_allowlist
 from neu_morpho.config import OutputConfig
 from neu_morpho.occupancy import occupied_blocks
-from neu_morpho.ops.manifest import (FAILED, FailureBreaker, check_manifest_matches_output,
-                                     check_selection, group_counts, guarded, is_complete,
+from neu_morpho.ops.manifest import (FAILED, FailureBreaker, check_grid,
+                                     check_manifest_matches_output, check_selection,
+                                     grid_record, group_counts, guarded, is_complete,
                                      write_failures)
 from neu_morpho.precomputed import write_body_skeleton, write_skeleton_info
 
@@ -188,6 +189,8 @@ def skeletonize_segments(
     chunk_todo = ([b for b in blocks
                    if not (resume and is_complete(manifest, "skel-chunk", b.index))]
                   if "skel-chunk" in stages else [])
+    check_grid(manifest, "skel-chunk", grid_record(cfg.block_shape, cfg.anisotropy),
+               stage="skel", progress_path=progress, record=bool(chunk_todo))
     check_selection(manifest, "skel-chunk", allow, stage="skel", progress_path=progress,
                     record=bool(chunk_todo))
 
