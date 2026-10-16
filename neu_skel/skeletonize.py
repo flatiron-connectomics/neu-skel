@@ -35,11 +35,13 @@ def _teasar_params(cfg: SkeletonConfig) -> dict:
 # Stage 1: one block
 # --------------------------------------------------------------------------- #
 def skeletonize_block(seg_block_zyx: np.ndarray, block_origin_vox_zyx: Sequence[int],
-                      cfg: SkeletonConfig, allowlist: set[int] | None = None) -> dict[int, object]:
+                      cfg: SkeletonConfig, allowlist: set[int] | None = None, *,
+                      level_origin_nm: Sequence[float] = (0.0, 0.0, 0.0)) -> dict[int, object]:
     """Skeletonize every (allowlisted) label in one block. Returns ``{body_id: Skeleton}``.
 
-    ``block_origin_vox_zyx`` is the block's origin in skeleton-scale voxels;
-    vertices come back in **global physical nm (zyx)**. ``fix_borders`` makes
+    ``block_origin_vox_zyx`` is the block's origin in skeleton-scale voxels and
+    ``level_origin_nm`` where that scale's index 0 lies (its ``Frame``); vertices come
+    back in **global physical nm (zyx)**. ``fix_borders`` makes
     kimimaro route each skeleton through the centre of every block-face contact
     area, so fragments from adjacent blocks meet at the seam and stage 2 can weld
     them.
@@ -54,7 +56,8 @@ def skeletonize_block(seg_block_zyx: np.ndarray, block_origin_vox_zyx: Sequence[
         return {}
 
     labels = seg_block_zyx
-    origin_nm = crop_origin_nm(block_origin_vox_zyx, cfg.anisotropy)   # anisotropy = skel voxel size
+    origin_nm = (crop_origin_nm(block_origin_vox_zyx, cfg.anisotropy)  # anisotropy = skel voxel size
+                 + np.asarray(level_origin_nm, dtype=np.float64))
 
     if cfg.tracer == "neutu":
         skels = _skeletonize_block_neutu(labels, present, cfg)

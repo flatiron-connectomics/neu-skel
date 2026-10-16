@@ -49,7 +49,8 @@ logger = logging.getLogger(__name__)
 # Picklable workers
 # --------------------------------------------------------------------------- #
 def _chunk_block(block, *, seg_spec: dict, chunked_dir: str, cfg: SkeletonConfig,
-                 allow: set[int] | None) -> tuple:
+                 allow: set[int] | None,
+                 level_origin_nm: Sequence[float] = (0.0, 0.0, 0.0)) -> tuple:
     """Trace one block into fragments. The read retries transient store errors; one
     that persists still fails the stage."""
     from neu_vol.backends.base import open_backend
@@ -58,7 +59,7 @@ def _chunk_block(block, *, seg_spec: dict, chunked_dir: str, cfg: SkeletonConfig
     seg = with_retry(lambda: open_backend(seg_spec).read_region(block.region),
                      label=f"skel block {block.index}")       # one block at the skeleton scale
     origin_vox = tuple(s.start for s in block.region)
-    skels = skeletonize_block(seg, origin_vox, cfg, allow)
+    skels = skeletonize_block(seg, origin_vox, cfg, allow, level_origin_nm=level_origin_nm)
     for body_id, skel in skels.items():
         _frag.write_skel_fragment(chunked_dir, body_id, block.index, skel, cfg.fragment_format)
     return (block.index, "written" if skels else "empty")
@@ -120,11 +121,13 @@ def skeletonize_segments(
     client: Any | None = None,
     npartitions: int | None = None,
     resume: bool = True,
+    level_origin_nm: Sequence[float] = (0.0, 0.0, 0.0),
 ) -> dict:
     """Skeletonize a segmentation body-by-body via block-first chunking + fusion.
 
     ``seg_spec`` must be opened at the skeleton scale, whose voxel size (nm) is
-    ``cfg.anisotropy``. With ``db_path``, each fused body's metrics (cable length,
+    ``cfg.anisotropy`` and whose index 0 lies at ``level_origin_nm`` (zyx, its
+    ``Frame``). With ``db_path``, each fused body's metrics (cable length,
     branch/tip counts, max radius) are written to the metrics DB by the driver,
     which is its sole writer.
 
@@ -204,7 +207,8 @@ def skeletonize_segments(
             # Stage 1 is deliberately NOT fault-isolated: see neu_morpho.ops.manifest.
             todo = chunk_todo
             worker = functools.partial(_chunk_block, seg_spec=seg_spec,
-                                       chunked_dir=chunked_dir, cfg=cfg, allow=allow)
+                                       chunked_dir=chunked_dir, cfg=cfg, allow=allow,
+                                       level_origin_nm=tuple(map(float, level_origin_nm)))
             block_map(todo, worker, client=client, npartitions=npartitions,
                       on_result=lambda r: manifest.record("skel-chunk", r))
 
@@ -290,4 +294,4 @@ def run_stage(plan, client, allowlist, *, tracer: str | None = None,
         occupancy_dilate=plan.occupancy_dilate, db_path=plan.db_path,
         fusion_stats_path=f"{plan.work_dir}/fusion_stats.jsonl",
         max_consecutive_failures=plan.max_consecutive_failures, client=client,
-        resume=plan.resume)
+        resume=plan.resume, level_origin_nm=s.frame.origin_nm)

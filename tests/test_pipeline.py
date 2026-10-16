@@ -222,3 +222,31 @@ def test_failed_bodies_exit_1_unless_allowed(monkeypatch, failed, flag, code):
     monkeypatch.setattr(pipeline, "plan", lambda *a, **k: object())
     monkeypatch.setattr(pipeline, "run", lambda p, **k: {"n_failed_bodies": failed})
     assert cli.main(["run", "--src", "x", "--dst", "y", "--serial", *flag]) == code
+
+
+@pytest.mark.parametrize("origin_nm", [(0.0, 0.0, 0.0), (800.0, 1600.0, 2400.0)])
+def test_skeletons_land_on_their_voxels_whatever_the_volumes_origin(tmp_path, origin_nm):
+    """A volume with a voxel offset (any crop) skeletonizes in place."""
+    from neu_lib import Frame, Piece
+    from neu_vol import convert, write_piece
+    from neu_vol.readback import read_body_skeleton
+
+    vol = np.zeros((64, 64, 64), np.uint64)
+    vol[4:60, 30:36, 30:36] = 7                           # a rod along z
+    write_piece(Piece(vol, Frame((8.0,) * 3, origin_nm), kind="segmentation", name="seg"),
+                str(tmp_path / "seg.h5"))
+    src = str(tmp_path / "seg")
+    convert(str(tmp_path / "seg.h5"), src, kind="segmentation",
+            profile="local-neuroglancer", chunk=(16, 16, 16), multiscale=False,
+            progress_path=str(tmp_path / "p.jsonl"))
+    p = pipeline.plan(src, src, work_dir=str(tmp_path / "work"), stages=("skel",),
+                      extra_stages={"skel": 0}, block=(32, 32, 32), occupancy_scale=-1,
+                      metrics_db=False)
+    pipeline.run(p, runners={"skel": run_stage})
+
+    verts = read_body_skeleton(src, 7)[0]                   # xyz nm
+    ox, oy, oz = np.asarray(origin_nm)[::-1]
+    # the rod's centreline: x and y near voxel 33 (264 nm), z within voxels 4..60; the
+    # tolerance is two voxels, against offsets of 800 nm and more
+    np.testing.assert_allclose(np.median(verts[:, :2], axis=0), [ox + 264, oy + 264], atol=16)
+    assert oz + 4 * 8 - 8 <= verts[:, 2].min() and verts[:, 2].max() <= oz + 60 * 8 + 8
